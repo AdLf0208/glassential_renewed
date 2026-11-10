@@ -1,0 +1,16 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "pattern": [
+    "AAA",
+    "A#A",
+    "AAA"
+  ],
+  "key": {
+    "#": "minecraft:ice",
+    "A": "minecraft:glass"
+  },
+  "result": {
+    "id": "glassential:ice_glass",
+    "count": 8
+  }
+}

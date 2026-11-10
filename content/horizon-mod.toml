@@ -1,0 +1,14 @@
+# Port-owned content mod for Glassential Renewed 3.4.7
+# (bigenergy/glassential-renewed, branch `1.21.1-neoforge`, MIT). Slice 1 is
+# the 24 full-cube glasses: the ethereal/ghostly/dark set, luminous and
+# redstone glass, smart/colorable glass, stone/sandstone/ice/iron/obsidian/
+# gravity glass, the two clear-fluid glasses and the four lamps. Textures,
+# models and lang are the upstream mod's own MIT assets (see ../LICENSE).
+id = "glassential"
+name = "Glassential Renewed"
+version = "0.1.0"
+description = "Various glasses for all your decorative needs"
+authors = ["Big_Energy"]
+api = "0.2"
+side = "both"
+capabilities = ["registries"]

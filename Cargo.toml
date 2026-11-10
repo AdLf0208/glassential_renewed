@@ -1,0 +1,16 @@
+[package]
+# Content port of: Glassential Renewed 3.4.7 (bigenergy/glassential-renewed,
+# branch `1.21.1-neoforge`, MIT). The registry model below is a clean-room
+# Rust rewrite; the textures, models and lang are the upstream mod's own MIT
+# assets (see ../LICENSE).
+name = "horizon-glassential"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.95"
+license = "MIT"
+description = "Glassential Renewed's full-cube glasses for Horizon"
+publish = false
+
+[lib]
+# This exact source is also injected as a same-crate module by horizon-mixins.
+path = "mixins/glassential/runtime.rs"

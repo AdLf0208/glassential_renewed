@@ -1,0 +1,17 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "building",
+  "pattern": [
+    "GGG",
+    "GPG",
+    "GGG"
+  ],
+  "key": {
+    "G": "minecraft:glass",
+    "P": "minecraft:prismarine_crystals"
+  },
+  "result": {
+    "id": "glassential:clear_fluid_glass",
+    "count": 8
+  }
+}
