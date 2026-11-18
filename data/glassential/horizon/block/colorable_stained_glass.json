@@ -1,0 +1,9 @@
+{
+  "template": "minecraft:white_stained_glass",
+  "state_properties": {
+    "lit": {
+      "type": "boolean"
+    }
+  },
+  "item": true
+}

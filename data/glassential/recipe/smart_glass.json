@@ -1,0 +1,17 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "pattern": [
+    "GGG",
+    "RAR",
+    "GGG"
+  ],
+  "key": {
+    "G": "minecraft:glass",
+    "R": "minecraft:redstone",
+    "A": "minecraft:amethyst_shard"
+  },
+  "result": {
+    "id": "glassential:smart_glass",
+    "count": 6
+  }
+}

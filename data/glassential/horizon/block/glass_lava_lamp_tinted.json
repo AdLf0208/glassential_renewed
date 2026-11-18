@@ -1,0 +1,7 @@
+{
+  "template": "minecraft:tinted_glass",
+  "properties": {
+    "light": 15
+  },
+  "item": true
+}

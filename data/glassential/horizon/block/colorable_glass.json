@@ -1,0 +1,9 @@
+{
+  "template": "minecraft:glass",
+  "state_properties": {
+    "lit": {
+      "type": "boolean"
+    }
+  },
+  "item": true
+}

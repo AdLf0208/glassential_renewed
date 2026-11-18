@@ -1,0 +1,19 @@
+[package]
+# The package's identity is horizon-mod.toml; this is the crate that carries its code.
+name = "mod-glassential"
+version = "0.2.0"
+edition = "2024"
+license = "MIT"
+description = "Glassential Renewed's full-cube glasses for Horizon: content plus the redstone and smart-glass halves"
+# Ported from: Glassential Renewed 3.4.7 (bigenergy/glassential-renewed, branch
+# `1.21.1-neoforge`, MIT). The textures, models, blockstates, lang and `.mcmeta`
+# files are the upstream mod's own MIT assets; the runtime model and the glue are
+# a clean-room Rust rewrite (see LICENSE and notes.md).
+# LOCAL-ONLY until the licence allows derivatives and the maintainer approves
+# publishing (ARCHITECTURE.md §8).
+publish = false
+
+[dependencies]
+# The pinned SDK's API crate, fetched into .horizon/sdk/ by any `cargo horizon-mod`
+# command and never packed. No other dependency.
+horizon-mod-api = { path = ".horizon/sdk/api/crates/horizon-mod-api" }

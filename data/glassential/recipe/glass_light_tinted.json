@@ -1,0 +1,16 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "pattern": [
+    "AAA",
+    "A#A",
+    "AAA"
+  ],
+  "key": {
+    "#": "minecraft:tinted_glass",
+    "A": "glassential:glass_light"
+  },
+  "result": {
+    "id": "glassential:glass_light_tinted",
+    "count": 8
+  }
+}

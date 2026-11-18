@@ -1,0 +1,16 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "pattern": [
+    "AAA",
+    "A#A",
+    "AAA"
+  ],
+  "key": {
+    "#": "minecraft:lava_bucket",
+    "A": "minecraft:tinted_glass"
+  },
+  "result": {
+    "id": "glassential:glass_lava_lamp_tinted",
+    "count": 2
+  }
+}

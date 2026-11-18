@@ -1,0 +1,9 @@
+{
+  "parent": "minecraft:block/cube_all",
+  "textures": {
+    "all": {
+      "sprite": "glassential:block/glass_light_tinted_item",
+      "force_translucent": true
+    }
+  }
+}

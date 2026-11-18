@@ -1,0 +1,21 @@
+id = "glassential"
+name = "Glassential Renewed"
+version = "0.2.0"
+description = """Twenty-four full-cube glasses for 26.3: ethereal, ghostly, luminous, redstone, smart, stone, ice, iron, obsidian, gravity, clear-fluid and lamp glasses, with their silk-touch loot, recipes, tags and creative tabs."""
+authors = ["Big_Energy (upstream)", "Horizon native mod contributors"]
+# The SDK package (mod API 0.2): one flat .hmod carrying the blocks in data/ and assets/,
+# the carried glass registry in src/runtime.rs and the server glue in src/support.rs. The id
+# is the resource namespace and the only identity.
+api = "0.2"
+side = "both"
+# Required by the manifest schema even though the blocks are content declarations rather than
+# Rust registrations; the schema allows exactly this value.
+capabilities = ["registries"]
+license = "MIT"
+homepage = "https://github.com/bigenergy/glassential-renewed"
+issues = "https://github.com/bigenergy/glassential-renewed/issues"
+
+[native]
+game = "26.3"
+horizon = "0b14f8acfd97fa2c750e42795249dcc981178ca4"
+mixins = "e59da9094f0c2fdda6c627fe9eff22dec6a906f0"

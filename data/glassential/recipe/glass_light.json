@@ -1,0 +1,16 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "pattern": [
+    "AAA",
+    "A#A",
+    "AAA"
+  ],
+  "key": {
+    "#": "minecraft:glowstone",
+    "A": "minecraft:glass"
+  },
+  "result": {
+    "id": "glassential:glass_light",
+    "count": 8
+  }
+}

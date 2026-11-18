@@ -1,0 +1,28 @@
+{
+  "template": "minecraft:glass",
+  "properties": {
+    "hardness": 0.6,
+    "explosion_resistance": 0.6
+  },
+  "state_properties": {
+    "up": {
+      "type": "boolean"
+    },
+    "down": {
+      "type": "boolean"
+    },
+    "east": {
+      "type": "boolean"
+    },
+    "west": {
+      "type": "boolean"
+    },
+    "north": {
+      "type": "boolean"
+    },
+    "south": {
+      "type": "boolean"
+    }
+  },
+  "item": true
+}

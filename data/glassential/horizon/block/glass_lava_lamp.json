@@ -1,0 +1,7 @@
+{
+  "template": "minecraft:glass",
+  "properties": {
+    "light": 15
+  },
+  "item": true
+}
