@@ -145,6 +145,29 @@ native-mod territory and are recorded as gaps:
 
 Skills: superpowers/using-superpowers, test-driven-development, systematic-debugging, verification-before-completion; BeautifulRust/rust-best-practices
 
+## Review fixes (2026-11-18)
+
+The reviewer's source review of PR #1242 (`var/review-all/1242-glassential.md`) left one finding;
+it is fixed in **0.2.1** (`128262 B`, sha256 `ea2478abbcf37e715eacffe89f5a21dcfdc722489fedeb0e8b7ac70b42640b7c`).
+
+- **`src/support.rs:222` — oversized connected panels were rebuilt as overlapping, start-dependent
+  1,024-cell subsets; subsets with different inputs overwrote shared cells with opposite powered
+  values, and each write marked the glass dirty again.** The panel rules now live in the pure
+  `src/panel.rs`: a component is walked whole (bounded by `MAX_SCAN`; a larger one is left alone
+  rather than written as a subset), its membership is canonical (sorted, deduplicated), its
+  `powered` value is a function of the **whole** component (`panel_powered`), writes are handed out
+  in batches under a per-tick cell budget (`CELLS_PER_TICK`), and `block_changed` ignores a
+  state-only change — which is what our own `powered` write is — so a rebuild cannot dirty itself.
+  Tests: `panel::tests::a_state_only_change_does_not_rebuild_the_panel`,
+  `…::a_panel_is_frosted_by_any_live_cell`,
+  `…::the_write_budget_partitions_a_panel_stably`,
+  `…::the_same_component_has_one_membership_whatever_the_start`; reverting the two rules makes two
+  of them fail (checked).
+
+**In-game leg:** `ports/tools/launcher-game.sh run glassential` → `PASS` + `E2E EXIT:0`, control
+`FAIL: setblock glassential:glass_dark_ethereal failed` + `EXIT:1`, recorded in
+`ports/_shared/evidence/glassential-e2e/`.
+
 ## Verification
 
 ### Unit tests (standalone crate)
@@ -761,3 +784,166 @@ Evidence lives in `../_shared/evidence/glassential/` (`sdk-*.log`); each command
   `e2e.log`, `e2e-counterfactual.log`, `e2e-selftest.log`, `e2e-repair.log` under
   `../_shared/evidence/glassential/`. `tools/e2e.sh` is updated for a launcher-built game
   (`GAME=`, optional `CONTROL_GAME=`, `SELFTEST=1`) and is the first job of the next slice.
+
+## Slice 3 — clear-fluid glass face connections (0.2.2, 2026-11-21)
+
+**Pin: Horizon/SDK `0a875da91dbb0fdcb7ba8c42c11341aa229af51a` (nightly 2026-11-20),
+horizon-mixins `e59da9094f0c2fdda6c627fe9eff22dec6a906f0`.** Class **content**, tier **data**
+(`ports/ledger.csv`), and this slice is the port's declared *server half* again — a state update on
+a carried block, the same shape as the smart-glass `powered` write in 0.2.0, not a new tier.
+
+### The gap line, and why this family
+
+From "Gaps and deviations" above (item 1 and the "Behaviour and the content-schema boundary"
+list):
+
+> **Clear fluid glass** (`BigGlassBlockEntity.java:12-70`) declares the real six booleans and the
+> multipart blockstate, but the placement/neighbour update that sets them and the fluid-face
+> occlusion are absent; setblock binds all 64 states.
+
+That is the largest dead surface the package ships: **128 of its 153 declared states** (64 per
+clear-fluid block) were reachable only by `/setblock` with an explicit state, so a player who
+placed two panes side by side saw the inner faces drawn and no state ever changed. The
+connectivity half is a pure state update — two hooks the pin has (`state_for_placement`,
+`update_shape`) — so it fits the tier exactly; the fluid-face half is client render and is
+recorded as a gap below. Nothing here needs a block entity, a menu or an entity renderer, and no
+mod outside the registry is involved.
+
+### Upstream rule (read, not translated)
+
+`ClearFluidGlassBlock extends BigGlassBlockEntity`. `BigGlassBlockEntity.getStateForPlacement` and
+`BigGlassBlockEntity.updateShape` both answer `northState.is(this)` (and the other five) — so a
+face's boolean is true **exactly when the block beside that face is the same block**. The
+blockstate draws a face model when its boolean is `false` (`assets/glassential/blockstates/
+clear_fluid_glass.json`), i.e. connected faces are culled. The port keeps that semantics and only
+that: `clear_fluid_glass` and `clear_fluid_fake_glass` do not link to each other, because upstream
+compares the `Block`, not "any glass".
+
+### The rule as a pure module (TDD, red first)
+
+`src/connect.rs` is new and pure: `Face` (six faces, each with the state property it writes and the
+step to its neighbour) and `Links` (the six answers, from a `same_block` closure). The three tests
+were written against a stub that answered "nothing is connected" and returned empty property names
+and zero offsets, and they failed on behaviour, not on a missing import:
+
+```
+---- connect::tests::a_face_links_only_where_the_block_beside_it_is_the_same_block stdout ----
+thread '…' panicked at src/connect.rs:83:13:
+assertion `left == right` failed: face North
+  left: false
+ right: true
+---- connect::tests::each_face_steps_towards_the_neighbour_it_names stdout ----
+thread '…' panicked at src/connect.rs:125:9:
+assertion `left == right` failed
+  left: [0, 0, 0]
+ right: [0, -1, 0]
+---- connect::tests::the_six_faces_name_the_properties_both_declarations_declare stdout ----
+thread '…' panicked at src/connect.rs:113:17:
+the declaration does not declare "": { for Down
+
+test result: FAILED. 14 passed; 3 failed; 0 ignored; 0 measured; 0 filtered out
+```
+
+(`../_shared/evidence/glassential/sdk-unit-red.log`.) After the implementation: **17 passed, 0
+failed**. The declaration test reads the two carried JSONs with `include_str!`, so a renamed
+property in `data/` fails the build's tests instead of silently freezing a face.
+
+### The glue
+
+| Hook | Home | What it does |
+|---|---|---|
+| `state_for_placement` | `support::Connected` Part on both clear-fluid blocks | answers the placement state with the six booleans read from the six neighbours (`event.context.pos`), or leaves vanilla's default when nothing links |
+| `update_shape` | same Part | answers the state the block takes after a neighbour change; the changed direction's state comes from `event.neighbour` (the level may still hold the old one), the other five from `level.block_state` |
+
+`Connected` carries its own `BlockKey` (attached per block, so a face compares `state.block() ==
+self.block` and never needs a registry-name lookup) and returns `None` when the answer equals the
+current state, so a neighbour that cannot change a face costs no write. `apply` goes through
+`LevelHost::state_with_property`, i.e. vanilla's `BlockState.setValue`.
+
+**Behaviour change for worlds, deliberately:** these six booleans are now *owned* by the block, as
+smart glass' `powered` has been since 0.2.0 — a `/setblock …[east=true]` with no neighbour is
+corrected at the next neighbour or shape update. `tools/e2e.sh`'s 64-state phase therefore places
+its cells **two apart** in x and y (it used to place them in a touching grid), so the phase still
+reads back exactly the state it wrote.
+
+### In-game proof (launcher build, offscreen, The End)
+
+The new phase of `tools/e2e.sh` places with `ctl place` (the placement hook), never `setblock`,
+and reads the state through `ctl block`:
+
+- an isolated pane is `down=false,east=false,north=false,south=false,up=false,west=false`;
+- the second pane of a run links both ways (`64,80,2.south=true`, `64,80,3.north=true`);
+- the middle pane of three links on both sides;
+- a pane stacked on the first links `up`/`down` (the vertical axis, not just north/south);
+- **differential**: `clear_fluid_fake_glass` beside the real one links neither way;
+- breaking the end pane clears the middle one's `south` again and keeps its `north`.
+
+| Run | Result |
+|---|---|
+| **red**, the delivered 0.2.1 build at this pin (`e2e-red-connect.log`) | `FAIL: glassential:clear_fluid_glass[down=false,east=false,north=false,south=false,up=false,west=false]: south is 'false', expected 'true'` + `EXIT:1` — the harness reaches the phase, the isolated assertion passes, and the derived one cannot |
+| default, 0.2.2 (`e2e-connect.log`) | `PASS` + `EXIT:0`, every phase of the port (see the coverage table) |
+| control, `GAME=$CONTROL_GAME` (`e2e-connect-control.log`) | `FAIL: setblock glassential:glass_dark_ethereal failed` + `EXIT:1` — the unmodded Nightly cannot answer for the package |
+| `SELFTEST=1` (`e2e-connect-selftest.log`) | `FAIL: NEGATIVE run did not observe the false assertion (Glassential drops=0)` + `EXIT:1` |
+
+`python3 ports/tools/check-e2e-logs.py glassential glassential-e2e --strict` → exit 0, 11 logs.
+
+### Coverage table (parity rule)
+
+| Family (from the jar) | State | Evidence / reason |
+|---|---|---|
+| 24 full-cube glasses: blockstates, models, textures, item definitions, lang, tabs | tested | e2e: 24/24 default states bind, 128/128 clear-fluid states bind, 24/24 items give, both tabs list 24 with their titles, 3/3 place |
+| 24 recipes | tested | `tools/craft_check.py` in-game: luminous, tinted-luminous, ethereal, reverse craft; the stick controls stay empty (the rest are carried recipes of the same two shapes over the same 24 item ids, out of this slice's scope — recorded, not silently dropped) |
+| 24 silk-touch loot tables | tested | e2e drops phase, with vanilla glass / vanilla tinted glass differentials |
+| `#minecraft:impermeable`, `#minecraft:mineable/pickaxe`, `c:glass_blocks`, `c:glass_blocks/tinted` | tested | e2e tag phase (vanilla ids at runtime, `c:` from the built `block-tags.json`) |
+| light level 15 (6 luminous) and light blocking (dark ethereal pair) | tested | e2e light phases |
+| redstone glass as a signal source, 15 every face | tested | e2e redstone lamp probe + removal |
+| smart-glass panel `powered` (1024-block cap, 64 panels/tick) | tested | e2e panel phase (`powered` true/false per pane) |
+| **clear-fluid face connections (this slice)** | **tested** | e2e connection phase, red→green above |
+| clear-fluid fluid-face occlusion (`getOcclusionShape`, `#glassential:clear_fluid_glass_fluids` = water) | blocked(`should_hide_adjacent_fluid_face` is resolved per state+fluid with no direction or position; a block's occlusion shape is not declarable in content 0.2) | 0.2.0 gap, still open |
+| per-entity collision (ethereal / dark ethereal / reverse / ghostly), fake glass non-solid to players, gravity glass' empty collision | blocked(no collision-shape hook in the API; `entity_inside` fires only inside a block the entity already collides with) | 0.2.0 gap, still open |
+| gravity glass: clamp downward velocity, `fallDistance * 0.2`, 6 ticks of slow falling | blocked(needs the empty collision above to be reachable at all) | 0.2.0 gap |
+| colour-able glass painter (block entity, colour/light/redstone/pass-through, menu, tint) | not ported (machines tier: block entity + menu + client tint, beyond this slice's data tier + declared server half) | 0.2.0 gap |
+| lava lamp step damage (`hotFloor` 1.0 unless sneaking) and the water-above bubble column | not ported (next slice: `block_step_on` exists at the pin; the bubble column needs a fluid tick) | 0.2.0 gap |
+| one-way and tinted one-way glass | not ported (custom baked model `glassential:one_way_loader` + mimic block entity) | 0.2.0 gap |
+| panes, doors, trapdoors, slab and the dyed door/trapdoor sets | not ported (later content slice; carried recipes + placements would need their own parity legs) | 0.2.0 gap |
+| item tooltips (`tooltip.glassential.*`) | blocked(content 0.2 has no item tooltip component) | 0.2.0 gap |
+| Fusion CTM | kept (Horizon implements Fusion); the e2e does not check pixels | 0.2.0 decision |
+
+### Upstream defects
+
+None fixed in this slice. `BigGlassBlockEntity.getStateForPlacement`/`updateShape` each call
+`.setValue(NORTH, …)` twice and never lose a property, so the redundancy changes no behaviour and
+is not "fixed" here; the port writes all six faces once.
+
+### Verification (0.2.2, this pin)
+
+| Check | Command | Result |
+|---|---|---|
+| Unit tests | `cargo test --offline` | **17 passed, 0 failed** (`sdk-test.log`) |
+| Lints / format | `cargo clippy --all-targets --offline -- -D warnings`, `cargo fmt --check` | `CLIPPY_EXIT:0` (0 warnings), `FMT_EXIT:0` (`sdk-clippy.log`) |
+| Package | `rm -f Cargo.lock && cargo horizon-mod build`, twice | `target/horizon-mod/glassential.hmod`, both runs byte-identical (`cmp`), `2728a87b…` (`sdk-build.log`, `sdk-build-second.log`) |
+| Registry check | `cargo horizon-mod check glassential.hmod` | `glassential 0.2.2 (native-mod, format native-1/0a875da91…/e59da909…, for 26.3)`, **132,860 B**, SHA-256 `2728a87b…fe92`, `CHECK_EXIT:0` (`sdk-check.log`) |
+| Fits (the pin) | `cargo horizon-mod fits glassential.hmod --build 0a875da` | `0a875da  made for`, `FITS_0a875da_EXIT:0` (`fits-0a875da.log`) |
+| Fits (another build) | `cargo horizon-mod fits glassential.hmod --build 0b14f8a` | `0b14f8a  fits`, `FITS_0b14f8a_EXIT:0` (`fits-0b14f8a.log`) |
+| Package gate | `python3 ports/tools/verify-sdk-package.py glassential` | **1/1 package(s) verified** |
+| Entries | `unzip -l glassential.hmod` | 256 entries, **no `Cargo.lock`** (`sdk-entries.log`) |
+| Uses | `uses.json` | 180 entries, 7 hook moments: `block_changed`, `block_signal`, `blocks`, `is_signal_source`, `level_tick_post`, `neighbor_changed`, **`state_for_placement`**, **`update_shape`** (`sdk-uses-summary.log`) |
+| `runtime.rs` | tree vs packed | `f0804f5f…33d7` both (`sdk-runtime-carry.log`) — the carried model is untouched |
+
+Artifact: `glassential.hmod`, **132,860 B**, SHA-256
+`2728a87ba5c469623230c137d16e0b1ca9b7e72ab99e1c836f16277e9f44fe92`, version **0.2.2** (manifest
+and `Cargo.toml`), 256 entries, built twice and `cmp`-identical.
+
+Skills: superpowers/using-superpowers, brainstorming, test-driven-development, systematic-debugging, verification-before-completion; BeautifulRust/rust-best-practices
+
+### Changelog (0.2.2)
+
+> **0.2.2 — the clear-fluid glasses now connect.** `clear_fluid_glass` and
+> `clear_fluid_fake_glass` derive their six `up/down/east/west/north/south` booleans from the block
+> beside each face, at placement (`state_for_placement`) and after every neighbour change
+> (`update_shape`), exactly as upstream's `BigGlassBlockEntity` does: a face links only to the same
+> block, so a run builds up on both axes and a broken pane clears its neighbour's face again. The
+> booleans are owned by the block now, so an explicitly set state is corrected on the next neighbour
+> update. Built against SDK `0a875da` / mixins `e59da90` for 26.3; behaviour, content and
+> `src/runtime.rs` are otherwise unchanged, and the fluid-face occlusion upstream draws is still an
+> API gap.

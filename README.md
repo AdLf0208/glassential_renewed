@@ -1,68 +1,57 @@
-# Glassential Renewed — a Horizon port
+# Glassential Renewed for Horizon
 
-**Glassential Renewed** is a Minecraft mod. Various types of glass to aid in your building. Updated to new MC. This repository is a **port of it to [Horizon](https://github.com/horizon-rust/horizon)**, the Rust engine for Minecraft Java 26.3. It carries the complete source of the port plus the content files it ships, and installs as a single `.hmod` package.
+Twenty-four full-cube glasses for Minecraft Java 26.3 on
+[Horizon](https://github.com/horizon-rust/horizon), ported from
+[Glassential Renewed 3.4.7](https://github.com/bigenergy/glassential-renewed)
+(branch `1.21.1-neoforge`, MIT).
 
-Upstream: [bigenergy/glassential-renewed](https://github.com/bigenergy/glassential-renewed) — licence **MIT**.
+This is **one flat SDK package** (mod API `0.2`): `glassential.hmod` carries the content
+(blockstates, models, textures, item definitions, loot, recipes, tags, creative tabs and
+lang) **and** the small server half the mod's own behaviour needs.
 
-| | |
+## What it adds
+
+| Family | Blocks |
 |---|---|
-| Upstream mod | Glassential Renewed ([source](https://github.com/bigenergy/glassential-renewed)) |
-| Ported to | Horizon 0b14f8a, Minecraft Java 26.3, mod API `0.2` |
-| Package | `glassential.hmod` (install it with the Horizon launcher) |
-| Licence | **MIT** — the upstream mod's licence; see [Licence and credit](#licence-and-credit) |
+| Ethereal / ghostly | `glass_dark_ethereal`, `glass_dark_ethereal_reverse`, `glass_ethereal`, `glass_ethereal_reverse`, `glass_ghostly` |
+| Colour-able | `colorable_glass`, `colorable_stained_glass` |
+| Light | `glass_light`, `glass_light_tinted`, `glass_lava_lamp`, `glass_lava_lamp_tinted`, `glass_glowstone_lamp`, `glass_glowstone_lamp_tinted` |
+| Redstone | `glass_redstone`, `glass_redstone_tinted` |
+| Smart | `smart_glass` |
+| Solid-looking | `obsidian_glass`, `stone_glass`, `sandstone_glass`, `ice_glass`, `iron_glass` |
+| Special | `gravity_glass`, `clear_fluid_glass`, `clear_fluid_fake_glass` |
 
-## What this port implements
+Every block drops itself only with silk touch (upstream's `dropWhenSilkTouch`), sits in
+`#c:glass_blocks` (`#c:glass_blocks/tinted` for the four tinted ones) and in
+`#minecraft:impermeable`, and appears in one of the mod's two creative tabs.
 
-- **Ethereal / ghostly / reverse** (`EtherealGlassBlock.java:26-31`,
-- **Gravity glass** (`GravityGlassBlock.java:29-73`) clamps downward velocity,
-- **Redstone glass** (`RedstoneGlassBlock.java:20-30`) is a signal source
-- **Smart glass** (`SmartGlassBlock.java:36-141`) declares the real `powered`
-- **Colour-able glass** (`ColorableGlassBlock.java:36-155`) declares the real
-- **Clear fluid glass** (`BigGlassBlockEntity.java:12-70`) declares the real
-- **Lava lamp** (`CustomGlassBlock.java:63-92`) emits 15, but the step damage
-- **Obsidian glass** keeps `hardness 1`, `explosion_resistance 1200` and
+**Implemented in code:** the two redstone glasses are redstone signal sources giving 15 on
+every face, and a smart-glass panel (the six-neighbour connected run) is frosted while a
+signal touches any cell.
 
-## Not yet ported
+## Known gaps
 
-- **Remaining behaviour is still content-only.** Redstone glass and the
-- **Smart-glass panel size.** The panel flood is an unbounded six-neighbour
-- **The panel updates once per level tick**, after `level_tick_post`, not
-- **One-way glasses deferred** (custom baked model); panes, doors, trapdoors,
-- **Fusion is kept.** Horizon has a Fusion implementation; the port relies on
-- **Item icons are cropped tiles.** The upstream item models inherit the CTM
-- **Tinted glasses need silk touch here.** Upstream's loot table uses
-- **No tooltips.** Upstream's `appendHoverText` lines (`tooltip.glassential.*`)
+The upstream per-entity collision (ethereal/ghostly/reverse), gravity glass's fall behaviour,
+the colour-able painter, the clear-fluid face occlusion, the lava lamp's damage and the
+one-way glasses are not implemented; the colour, collision and facing behaviours the pin
+cannot express as content are listed in `notes.md` under "Gaps and deviations".
 
-## Installing
+## Building
 
-1. Install the [Horizon launcher](https://github.com/horizon-rust/horizon/releases) (0.2.70 or newer).
-2. Add `glassential.hmod` to the instance's mods.
-3. The package is pinned to a specific Horizon build; the launcher checks that pin.
-
-## Licence and credit
-
-Glassential Renewed was created by its upstream authors; the code, models and assets in the original mod
-remain theirs and are used here under **MIT**. The Rust in this repository is a clean-room
-rewrite for Horizon, not a translation of the original source.
-
-- `LICENSE` — the upstream licence text.
-- `LICENSE-NOTICE.md` — what this port carries and where it came from.
-- The upstream project: https://github.com/bigenergy/glassential-renewed
-
-## Technical details
-
-```
-horizon-mod.toml   package manifest (id, version, api, [native] pin)
-Cargo.toml         the crate; depends on `horizon-mod-api` from the fetched SDK
-src/               lib.rs (the one `impl Hooks`), runtime.rs (pure logic + tests), glue
-assets/ data/      the content the package ships
-tools/             content generators and the e2e scenario
+```sh
+cargo test                       # the pure registry model (9 tests)
+cargo clippy --all-targets -- -D warnings
+rm -f Cargo.lock                 # a packed lock changes the artifact
+cargo horizon-mod build          # -> target/horizon-mod/glassential.hmod
+cargo horizon-mod check glassential.hmod
 ```
 
-- Build: `cargo horizon-mod build` (packages; it does not compile against the game).
-- Test: `cargo test`, `cargo clippy --all-targets -- -D warnings`.
-- In-game: `ports/tools/launcher-game.sh run glassential` in the campaign tree, or install the
-  `.hmod` and play; the harness scenario is `tools/e2e.sh`.
+The game half needs a game the launcher built with this package
+(`horizon-launcher native-build ports/glassential --instance <i> --trust-native-code`);
+`tools/e2e.sh` drives the scenario.
 
-This repository is generated from the campaign's port at `ports/glassential/`; the port's own
-`notes.md` is the full record (decisions, traps, evidence).
+## Licence
+
+MIT. The upstream licence and copyright notice travel in `LICENSE` and
+`LICENSE-NOTICE.md`, both inside the package. The port is local-only until the maintainer
+approves publishing (campaign rule, `ARCHITECTURE.md` §8).

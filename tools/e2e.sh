@@ -21,6 +21,11 @@
 #      (its `powered` state, which selects the frosted model) when a signal
 #      touches one block of the run, an isolated pane stays clear, and
 #      removing the signal clears the panel;
+#   2c. the clear-fluid glasses derive their six face booleans from the block
+#      beside each face (the placement hook and the shape update): a placed run
+#      connects east/west/up/down, an isolated pane connects to nothing, the
+#      other clear-fluid block (`clear_fluid_fake_glass`) links neither way,
+#      and breaking an end pane clears its neighbour's face again;
 #   3. every glass drops itself only with silk touch: without it
 #      glass_light/glass_light_tinted/glass_ethereal/obsidian_glass drop
 #      nothing, while vanilla tinted glass drops itself (the differential);
@@ -212,12 +217,15 @@ assert_prop "$colorable" lit false
 echo "smart glass: default clear at x=35, frosted beside the redstone glass at x=11, a hand-set powered=true cleared at x=30; colorable lit binds"
 
 say "both clear-fluid glasses bind all 64 connection states"
+# Two cells apart in x and y: the six booleans are *derived* from the block beside each
+# face (the connection phase below), so a touching pair would recompute each other's
+# state and this phase would no longer be reading what it wrote.
 for block in clear_fluid_glass clear_fluid_fake_glass; do
     base=40
     [ "$block" = clear_fluid_fake_glass ] && base=60
     for mask in $(seq 0 63); do
-        x=$(( base + mask % 8 ))
-        y=$(( 90 + mask / 8 ))
+        x=$(( base + 2 * (mask % 8) ))
+        y=$(( 90 + 2 * (mask / 8) ))
         up=$(( (mask >> 0) & 1 )); down=$(( (mask >> 1) & 1 ))
         east=$(( (mask >> 2) & 1 )); west=$(( (mask >> 3) & 1 ))
         north=$(( (mask >> 4) & 1 )); south=$(( (mask >> 5) & 1 ))
@@ -230,8 +238,8 @@ for block in clear_fluid_glass clear_fluid_fake_glass; do
     base=40
     [ "$block" = clear_fluid_fake_glass ] && base=60
     for mask in $(seq 0 63); do
-        x=$(( base + mask % 8 ))
-        y=$(( 90 + mask / 8 ))
+        x=$(( base + 2 * (mask % 8) ))
+        y=$(( 90 + 2 * (mask / 8) ))
         got=$(full_state "$x" "$y" 0)
         for pair in "up:$(( (mask >> 0) & 1 ))" "down:$(( (mask >> 1) & 1 ))" "east:$(( (mask >> 2) & 1 ))" "west:$(( (mask >> 3) & 1 ))" "north:$(( (mask >> 4) & 1 ))" "south:$(( (mask >> 5) & 1 ))"; do
             key=${pair%%:*}; bit=${pair##*:}
@@ -242,7 +250,70 @@ for block in clear_fluid_glass clear_fluid_fake_glass; do
 done
 echo "128/128 clear-fluid states bind (64 per glass); 153 distinct states in all"
 
-# -------------------------------------------------------------------- light
+# -------------------------------------------------- clear-fluid connections
+say "clear-fluid glass derives its six face connections from its own kind"
+# Upstream's `BigGlassBlockEntity.getStateForPlacement`/`updateShape`: a face's boolean is
+# true exactly when the block beside that face is the *same* block, so a player-placed run
+# connects and a break disconnects again. Every block here is placed with `ctl place` (the
+# placement hook), never `setblock`, which takes the state it is given. The run goes along
+# +z with the player standing west of it: each target cell's floor face stays visible, and a
+# placed pane never blocks the next placement's line of sight.
+ctl command "gamemode creative @s" >/dev/null
+ctl command "clear @s" >/dev/null
+ctl tp 62.5 80 3.5 >/dev/null
+ctl wait 3
+place_glass() { # x y z id
+    local reply
+    ctl give "$4" 1 >/dev/null || fail "cannot give $4"
+    ctl wait 2
+    ctl select "$4" >/dev/null || fail "cannot select $4"
+    ctl wait 2
+    reply=$(ctl place "$1" "$2" "$3" --item "$4" 2>&1) || { echo "place reply: $reply"; fail "cannot place $4 at $1 $2 $3"; }
+    [ "$(block_state "$1" "$2" "$3")" = "$4" ] || fail "$4 did not land at $1 $2 $3"
+}
+place_glass 64 80 2 glassential:clear_fluid_glass
+ctl wait 4
+isolated=$(full_state 64 80 2)
+for key in up down east west north south; do
+    assert_prop "$isolated" "$key" false
+done
+echo "an isolated pane connects to nothing ($isolated)"
+place_glass 64 80 3 glassential:clear_fluid_glass
+ctl wait 4
+assert_prop "$(full_state 64 80 2)" south true
+assert_prop "$(full_state 64 80 2)" north false
+assert_prop "$(full_state 64 80 3)" north true
+assert_prop "$(full_state 64 80 3)" south false
+echo "the second pane links both ways: 64,80,2.south=true, 64,80,3.north=true"
+place_glass 64 80 4 glassential:clear_fluid_glass
+ctl wait 4
+assert_prop "$(full_state 64 80 3)" south true
+assert_prop "$(full_state 64 80 3)" north true
+assert_prop "$(full_state 64 80 2)" north false
+echo "the middle pane of a three-run links on both sides"
+place_glass 64 81 2 glassential:clear_fluid_glass
+ctl wait 4
+assert_prop "$(full_state 64 80 2)" up true
+assert_prop "$(full_state 64 81 2)" down true
+assert_prop "$(full_state 64 81 2)" south false
+echo "a pane stacked above links up/down (the vertical axis, not just north/south)"
+# The differential: `clear_fluid_fake_glass` is a different block, so it must link neither way.
+place_glass 64 80 5 glassential:clear_fluid_fake_glass
+ctl wait 4
+assert_prop "$(full_state 64 80 4)" south false
+assert_prop "$(full_state 64 80 5)" north false
+echo "the fake glass beside the real one links neither way (a different block)"
+# Breaking the end pane clears the middle one's face again.
+ctl look-at-block 64 80 5 >/dev/null || true
+ctl break 64 80 5 >/dev/null || fail "cannot break the fake glass"
+ctl wait 2
+ctl look-at-block 64 80 4 >/dev/null || true
+ctl break 64 80 4 >/dev/null || fail "cannot break the third pane"
+ctl wait 4
+assert_prop "$(full_state 64 80 3)" south false
+assert_prop "$(full_state 64 80 3)" north true
+echo "breaking the end pane clears the middle one's south face and keeps its north link"
+
 say "luminous glass and the four lamps emit 15; ethereal and stone glass emit 0"
 for i in "${!LUMINOUS[@]}"; do
     ctl setblock "$((i * 20))" 100 20 "glassential:${LUMINOUS[$i]}" >/dev/null || fail "setblock ${LUMINOUS[$i]} failed"
@@ -554,4 +625,4 @@ ctl setblock 7 80 5 "glassential:glass_light[powered=true]" >/dev/null 2>&1 || t
 [ "$(block_state 7 80 5)" = "minecraft:air" ] || fail "glass_light accepted a state it does not declare"
 echo "unknown ids and undeclared states are refused"
 
-echo "PASS: 153 states bind, 6/6 luminous glasses emit 15, dark ethereal blocks light, redstone glass powers a lamp while ethereal glass does not, smart glass frosts its signal-touched panel and clears it, every glass needs silk touch while vanilla tinted glass does not, the four recipes craft, 24 items give and the two tabs list them, the block items place, and unknown ids are refused"
+echo "PASS: 153 states bind, 6/6 luminous glasses emit 15, dark ethereal blocks light, redstone glass powers a lamp while ethereal glass does not, smart glass frosts its signal-touched panel and clears it, clear-fluid glass derives its six face connections from its own kind, every glass needs silk touch while vanilla tinted glass does not, the four recipes craft, 24 items give and the two tabs list them, the block items place, and unknown ids are refused"

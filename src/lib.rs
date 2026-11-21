@@ -12,6 +12,7 @@
 //! |---|---|---|
 //! | `is_signal_source`, `block_signal` | [`support::Redstone`] Part | the two redstone glasses answer as sources and give 15 on every face |
 //! | `neighbor_changed` | [`support::Smart`] Part | a smart pane took a neighbour update, so its panel may need rebuilding |
+//! | `state_for_placement`, `update_shape` | [`support::Connected`] Part | a clear-fluid glass takes the six face booleans of its own kind, at placement and on every neighbour change |
 //! | [`Hooks::block_changed`] | this module | a smart pane was placed or removed |
 //! | [`Hooks::level_tick_post`] | this module | rebuild every marked smart-glass panel of the level that just ticked |
 
@@ -21,6 +22,8 @@ use mod_api::{
     BlockChangedEvent, HostSide, LevelHost, LevelTickPostEvent, Registrar, RegistrationContext,
 };
 
+pub mod connect;
+pub mod panel;
 pub mod runtime;
 mod support;
 

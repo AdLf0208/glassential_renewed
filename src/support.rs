@@ -8,19 +8,24 @@
 //! world and writes it back.
 //!
 //! The panel rule, unchanged from the retired glue: a smart-glass panel is the six-neighbour
-//! connected component of `glassential:smart_glass` around a changed cell, capped at
-//! [`MAX_PANEL`] blocks, and it is frosted (`powered=true`, which selects the model) exactly
-//! when some cell of it has a neighbour signal. A rebuild happens at `level_tick_post`, at most
-//! [`PANELS_PER_TICK`] panels per level per tick.
+//! connected component of `glassential:smart_glass` around a changed cell. Its membership is the
+//! whole component, canonically ordered in [`crate::panel`], and it is frosted (`powered=true`,
+//! which selects the model) exactly when some cell of it has a neighbour signal — one value for
+//! the whole component, so batches of one panel can never disagree. A rebuild happens at
+//! `level_tick_post`, at most [`panel::CELLS_PER_TICK`] writes per level per tick, and the glue
+//! ignores its own `powered` writes when it decides whether membership changed.
 
 use std::collections::HashSet;
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use mod_api::{
-    BlockChangedEvent, BlockKey, BlockPart, BlockSignalEvent, BlockState, Host,
+    BlockChangedEvent, BlockKey, BlockPart, BlockSignalEvent, BlockState, Direction, Host,
     IsSignalSourceEvent, LevelHost, LevelKey, LevelRef, LevelTicksHost, NeighborChangedEvent,
-    Registrar, ServerHost,
+    Registrar, ServerHost, StateForPlacementEvent, UpdateShapeEvent,
 };
+
+use crate::connect::{Face, Links};
+use crate::panel;
 
 /// The two upstream redstone glasses: `BlockState.isSignalSource` and 15 on every face
 /// (`RedstoneGlassBlock.java:20-30` upstream).
@@ -31,6 +36,12 @@ const REDSTONE: [&str; 2] = [
 
 /// The smart-glass block whose connected panel is frosted by a signal.
 const SMART: &str = "glassential:smart_glass";
+
+/// The two clear-fluid glasses whose six face booleans follow their own kind.
+const CLEAR_FLUID: [&str; 2] = [
+    "glassential:clear_fluid_glass",
+    "glassential:clear_fluid_fake_glass",
+];
 
 /// The state property the frosted model is selected by.
 const POWERED: &str = "powered";
@@ -44,15 +55,6 @@ const NEIGHBOURS: [[i32; 3]; 6] = [
     [0, 0, 1],
     [0, 0, -1],
 ];
-
-/// Upstream's smart-glass limit: a panel is at most 1024 blocks, and a larger connected mass is
-/// split where the walk reaches the cap (`Config.smartMaxPanel`). It keeps a rebuild bounded:
-/// without it a huge connected component walked and rewrote every member in one server tick.
-const MAX_PANEL: usize = 1024;
-
-/// How many panels one level tick rebuilds; the rest stay marked for the next tick, so a world
-/// with many changed panels spreads the work instead of stalling one tick.
-const PANELS_PER_TICK: usize = 64;
 
 /// The cells a rebuild still owes, keyed by the level's own dimension id and a block position.
 ///
@@ -139,7 +141,108 @@ impl BlockPart for Smart {
     }
 }
 
-/// Attach the Parts to the three blocks the server half answers for.
+/// A clear-fluid glass: the six face booleans follow the block beside each face.
+///
+/// Upstream derives them in two moments, and so does this Part: `getStateForPlacement` picks the
+/// state the block is placed with ([`BlockPart::state_for_placement`]), and `updateShape` answers
+/// the state it takes when a neighbour changes ([`BlockPart::update_shape`]). A face links only to
+/// the *same* block, so `clear_fluid_glass` and `clear_fluid_fake_glass` never link to each other;
+/// the Part is attached per block and carries that block's own key, so the test costs one
+/// comparison and no registry lookup.
+pub struct Connected {
+    block: BlockKey,
+}
+
+#[mod_api::horizon_part]
+impl BlockPart for Connected {
+    /// The state the block is placed with: the six faces, as its neighbours are.
+    ///
+    /// `None` leaves vanilla's answer, which is the block's default state — every face false —
+    /// and that is also what this rule wants when nothing beside the block is the same block, so
+    /// an isolated pane costs no write.
+    fn state_for_placement(
+        &self,
+        level: &dyn LevelHost,
+        event: &mut StateForPlacementEvent<'_>,
+    ) -> Option<Option<BlockState>> {
+        let pos = event.context.pos;
+        let links = self.links(level, [pos.x, pos.y, pos.z], None);
+        apply(level, event.state, links).map(Some)
+    }
+
+    /// The state the block takes now that its neighbour in `event.direction` changed.
+    ///
+    /// `None` keeps the state as it is, so a neighbour that cannot change any face costs nothing.
+    fn update_shape(
+        &self,
+        level: &mut dyn LevelTicksHost,
+        event: &mut UpdateShapeEvent,
+    ) -> Option<BlockState> {
+        let pos = [event.pos.x, event.pos.y, event.pos.z];
+        let links = self.links(
+            level,
+            pos,
+            Some((face_of(event.direction), event.neighbour)),
+        );
+        apply(level, event.state, links)
+    }
+}
+
+impl Connected {
+    /// The six faces of the block at `pos`, read from the block beside each one.
+    ///
+    /// `changed` is the neighbour a shape update is about: its new state comes from the event
+    /// rather than from the level, which may still hold the one it replaced.
+    fn links(
+        &self,
+        level: &dyn LevelHost,
+        pos: [i32; 3],
+        changed: Option<(Face, BlockState)>,
+    ) -> Links {
+        Links::from_connected(|face| {
+            let beside = match changed {
+                Some((changed_face, state)) if changed_face == face => Some(state),
+                _ => {
+                    let [dx, dy, dz] = face.offset();
+                    level.block_state([pos[0] + dx, pos[1] + dy, pos[2] + dz])
+                }
+            };
+            beside.is_some_and(|state| state.block() == self.block)
+        })
+    }
+}
+
+/// The face a direction names.
+fn face_of(direction: Direction) -> Face {
+    match direction {
+        Direction::Down => Face::Down,
+        Direction::Up => Face::Up,
+        Direction::North => Face::North,
+        Direction::South => Face::South,
+        Direction::West => Face::West,
+        Direction::East => Face::East,
+    }
+}
+
+/// `state` with its six face properties set as `links` says, or `None` when that changes nothing.
+///
+/// A property the declaration is missing makes the whole answer `None` rather than a half-written
+/// state: the caller then keeps vanilla's state (the default, every face false), and
+/// `connect`'s declaration test is what keeps the two in step.
+fn apply(level: &dyn LevelHost, state: BlockState, links: Links) -> Option<BlockState> {
+    let mut answered = state;
+    for face in Face::ALL {
+        let value = if links.is_connected(face) {
+            "true"
+        } else {
+            "false"
+        };
+        answered = level.state_with_property(answered, face.property(), value)?;
+    }
+    (answered != state).then_some(answered)
+}
+
+/// Attach the Parts to the blocks the server half answers for.
 pub fn declare(r: &mut dyn Registrar, dirty: &Arc<Dirty>) {
     for id in REDSTONE {
         // The key is named first: `block_part` also borrows the registrar mutably.
@@ -153,6 +256,10 @@ pub fn declare(r: &mut dyn Registrar, dirty: &Arc<Dirty>) {
             dirty: Arc::clone(dirty),
         },
     );
+    for id in CLEAR_FLUID {
+        let block = r.block_key(id);
+        r.block_part(block, Connected { block });
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -160,14 +267,15 @@ pub fn declare(r: &mut dyn Registrar, dirty: &Arc<Dirty>) {
 // ---------------------------------------------------------------------------
 
 /// A smart pane was placed, replaced or removed: its panel gained or lost a cell, so mark the
-/// cell and its neighbours. A write that leaves the smart glass alone cannot change a panel's
-/// membership, and the power side is the Part's `neighbor_changed`, so everything else is
-/// ignored.
+/// cell and its neighbours. A state-only change (the glue's own `powered` write, or a mod
+/// re-setting another smart-glass property) cannot change membership and is ignored — that is
+/// what used to make each panel write dirty the panel again. The power side is the Part's
+/// `neighbor_changed`, so everything else is ignored too.
 pub fn on_block_changed(dirty: &Dirty, level: &dyn LevelHost, event: &mut BlockChangedEvent) {
     if event.old == event.new {
         return;
     }
-    if !is_smart(level, event.old) && !is_smart(level, event.new) {
+    if !panel::membership_changed(is_smart(level, event.old), is_smart(level, event.new)) {
         return;
     }
     dirty.mark(
@@ -207,58 +315,84 @@ pub fn on_level_tick_post(dirty: &Dirty, host: &mut dyn ServerHost, level: Level
     starts.sort_unstable();
     starts.dedup();
     starts.retain(|pos| level.block(&*host, *pos) == Some(smart));
-    if starts.len() > PANELS_PER_TICK {
-        for pos in &starts[PANELS_PER_TICK..] {
+    if starts.len() > panel::PANELS_PER_TICK {
+        for pos in &starts[panel::PANELS_PER_TICK..] {
             mark_in(&mut dirty.cells(), dimension, *pos);
         }
-        starts.truncate(PANELS_PER_TICK);
+        starts.truncate(panel::PANELS_PER_TICK);
     }
+    // One budget for the whole level tick. It is spent on writes only: a cell that already has
+    // the wanted value costs nothing, so a large panel always makes progress and is finished by
+    // the following ticks, each writing the same value.
+    let mut budget = panel::CELLS_PER_TICK;
     let mut rebuilt: HashSet<[i32; 3]> = HashSet::new();
     for start in starts {
         if !rebuilt.insert(start) {
             continue;
         }
-        // A start was filtered to a smart pane above, so its panel always holds it.
-        let panel = component(&*host, level, smart, start);
-        for pos in &panel {
-            rebuilt.insert(*pos);
+        // A start was filtered to a smart pane above, so its panel always holds it. A component
+        // beyond the scan bound is left alone: a partial, start-dependent subset must never be
+        // written (that is the defect this rule fixes).
+        let Some(component) = component(&*host, level, smart, start) else {
+            continue;
+        };
+        let cells = panel::canonical(&component);
+        let mut signals = Vec::with_capacity(cells.len());
+        for pos in &cells {
+            signals.push(level.best_neighbor_signal(&*host, *pos).unwrap_or(0));
         }
-        let powered = panel.iter().any(|pos| {
-            level
-                .best_neighbor_signal(&*host, *pos)
-                .is_some_and(|signal| signal > 0)
-        });
-        let want = if powered { "true" } else { "false" };
-        for pos in panel {
-            if level.block_property(&*host, pos, POWERED).as_deref() == Some(want) {
-                continue;
+        let want = if panel::panel_powered(&signals) {
+            "true"
+        } else {
+            "false"
+        };
+        for batch in panel::batches(cells.len(), panel::MAX_PANEL) {
+            for pos in &cells[batch] {
+                rebuilt.insert(*pos);
+                if budget == 0 {
+                    // Out of this tick's writes: keep the cell marked so a later tick finishes
+                    // the same panel with the same value.
+                    mark_in(&mut dirty.cells(), dimension, *pos);
+                    continue;
+                }
+                if level.block_property(&*host, *pos, POWERED).as_deref() == Some(want) {
+                    continue;
+                }
+                if host.set_block_property(*pos, POWERED, want) {
+                    budget -= 1;
+                }
             }
-            host.set_block_property(pos, POWERED, want);
         }
     }
 }
 
-/// The connected smart-glass panel containing `start`, at most [`MAX_PANEL`] blocks.
-fn component(host: &dyn Host, level: LevelRef, smart: BlockKey, start: [i32; 3]) -> Vec<[i32; 3]> {
+/// The connected smart-glass panel containing `start`, at most [`panel::MAX_SCAN`] cells.
+///
+/// `None` means the component is larger than the scan bound: the caller leaves it untouched
+/// rather than writing a subset picked by the walk order.
+fn component(
+    host: &dyn Host,
+    level: LevelRef,
+    smart: BlockKey,
+    start: [i32; 3],
+) -> Option<Vec<[i32; 3]>> {
     let mut seen = HashSet::from([start]);
     let mut stack = vec![start];
     while let Some(pos) = stack.pop() {
-        if seen.len() >= MAX_PANEL {
-            break;
-        }
         for [dx, dy, dz] in NEIGHBOURS {
-            if seen.len() >= MAX_PANEL {
-                break;
-            }
             let next = [pos[0] + dx, pos[1] + dy, pos[2] + dz];
             if seen.contains(&next) {
                 continue;
             }
-            if level.block(host, next) == Some(smart) {
-                seen.insert(next);
-                stack.push(next);
+            if level.block(host, next) != Some(smart) {
+                continue;
             }
+            seen.insert(next);
+            if seen.len() > panel::MAX_SCAN {
+                return None;
+            }
+            stack.push(next);
         }
     }
-    seen.into_iter().collect()
+    Some(seen.into_iter().collect())
 }
